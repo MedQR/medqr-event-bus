@@ -2,6 +2,28 @@ const { onMessagePublished } = require("firebase-functions/v2/pubsub");
 const { TOPIC_NAME } = require("./publisher");
 
 /**
+ * Resolve the topic this subscriber should listen to.
+ *
+ * If EVENT_BUS_PROJECT_ID is set, returns the fully-qualified topic
+ * resource (`projects/<bus-project>/topics/hospital-events`) which
+ * lets the subscriber listen to a topic in a DIFFERENT GCP project
+ * from where the Cloud Function itself is deployed. Cross-project
+ * IAM must grant the function's runtime service account
+ * `roles/pubsub.subscriber` on that topic.
+ *
+ * If unset, falls back to the bare topic name, which Cloud Functions
+ * resolves against the function's own project. Useful for local
+ * emulator runs only.
+ */
+function resolveTopic() {
+  const busProjectId = process.env.EVENT_BUS_PROJECT_ID;
+  if (busProjectId) {
+    return "projects/" + busProjectId + "/topics/" + TOPIC_NAME;
+  }
+  return TOPIC_NAME;
+}
+
+/**
  * Creates a Pub/Sub subscriber Cloud Function that filters by event type(s).
  *
  * @param {string} name - Subscriber name (for logging)
@@ -15,7 +37,7 @@ function createSubscriber(name, eventTypes, handler, options = {}) {
 
   return onMessagePublished(
     {
-      topic: TOPIC_NAME,
+      topic: resolveTopic(),
       ...options,
     },
     async (cloudEvent) => {
