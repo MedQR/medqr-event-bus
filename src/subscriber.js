@@ -2,21 +2,16 @@ const { onMessagePublished } = require("firebase-functions/v2/pubsub");
 const { TOPIC_NAME } = require("./publisher");
 
 /**
- * Resolve the topic this subscriber should listen to.
+ * Build the topic resource string for cross-project subscriptions.
+ * Caller passes busProjectId explicitly via createSubscriber options;
+ * we do NOT read from process.env here because firebase-functions's
+ * topic config is consumed at deploy-time module load, where env
+ * propagation through the CLI is unreliable. Explicit > implicit.
  *
- * If EVENT_BUS_PROJECT_ID is set, returns the fully-qualified topic
- * resource (`projects/<bus-project>/topics/hospital-events`) which
- * lets the subscriber listen to a topic in a DIFFERENT GCP project
- * from where the Cloud Function itself is deployed. Cross-project
- * IAM must grant the function's runtime service account
- * `roles/pubsub.subscriber` on that topic.
- *
- * If unset, falls back to the bare topic name, which Cloud Functions
- * resolves against the function's own project. Useful for local
- * emulator runs only.
+ * @param {string|undefined} busProjectId
+ * @returns {string} either fully-qualified topic resource or bare name
  */
-function resolveTopic() {
-  const busProjectId = process.env.EVENT_BUS_PROJECT_ID;
+function buildTopic(busProjectId) {
   if (busProjectId) {
     return "projects/" + busProjectId + "/topics/" + TOPIC_NAME;
   }
@@ -28,17 +23,22 @@ function resolveTopic() {
  *
  * @param {string} name - Subscriber name (for logging)
  * @param {string|string[]} eventTypes - Event type(s) to subscribe to
- * @param {function} handler - async (event) => void — receives the parsed event envelope
- * @param {object} [options] - Additional Cloud Function options (memory, timeoutSeconds, secrets, etc.)
+ * @param {function} handler - async (event) => void
+ * @param {object} [options]
+ * @param {string} [options.busProjectId] - GCP project hosting the
+ *   shared `hospital-events` topic. Required for cross-project use.
+ *   Cross-project IAM must grant the function's runtime SA
+ *   `roles/pubsub.subscriber` on that topic.
  * @returns Cloud Function export
  */
 function createSubscriber(name, eventTypes, handler, options = {}) {
   const types = Array.isArray(eventTypes) ? eventTypes : [eventTypes];
+  const { busProjectId, ...cfOptions } = options;
 
   return onMessagePublished(
     {
-      topic: resolveTopic(),
-      ...options,
+      topic: buildTopic(busProjectId),
+      ...cfOptions,
     },
     async (cloudEvent) => {
       const raw = Buffer.from(cloudEvent.data.message.data, "base64").toString();

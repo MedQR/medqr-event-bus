@@ -3,26 +3,29 @@ const { createEvent } = require("./schema");
 
 const TOPIC_NAME = "hospital-events";
 
-// Every publisher in the MedQR ecosystem writes to ONE central topic
-// in ONE shared GCP project. That project is read from env var
-// EVENT_BUS_PROJECT_ID at runtime - set to medqr-uat (UAT) or
-// medqr-78c68 (PROD) on every deploy that uses the bus.
+// Every publisher writes to ONE central topic in ONE shared GCP
+// project. The project is passed explicitly to publishEvent via
+// options.busProjectId. Reading env at module load time is unreliable
+// across runtime/deploy contexts (firebase-functions topic config
+// resolution timing) - so the contract is "caller passes it".
 //
-// Falls back to the function's own project if the env is missing.
-// Useful for local emulator runs only; production deployments must
-// set the var or events will go to the wrong project.
-function getBusProjectId() {
+// For convenience, EVENT_BUS_PROJECT_ID env var is honored as a
+// fallback at publish time (publishing IS a runtime operation, not
+// deploy-time wiring, so env is reliable here).
+function resolveBusProjectId(explicit) {
+  if (explicit) return explicit;
   return process.env.EVENT_BUS_PROJECT_ID || undefined;
 }
 
-let pubsubClient = null;
+let pubsubClientByProject = new Map();
 
-function getPubSubClient() {
-  if (!pubsubClient) {
-    const projectId = getBusProjectId();
-    pubsubClient = projectId ? new PubSub({ projectId }) : new PubSub();
+function getPubSubClient(projectId) {
+  const key = projectId || "__default__";
+  if (!pubsubClientByProject.has(key)) {
+    const client = projectId ? new PubSub({ projectId }) : new PubSub();
+    pubsubClientByProject.set(key, client);
   }
-  return pubsubClient;
+  return pubsubClientByProject.get(key);
 }
 
 /**
@@ -36,6 +39,8 @@ function getPubSubClient() {
  * @param {string} [options.source] - Source identifier
  * @param {string} [options.correlationId] - Correlation ID for tracing
  * @param {string} [options.causedBy] - Parent event ID
+ * @param {string} [options.busProjectId] - Cross-project bus project.
+ *   Falls back to EVENT_BUS_PROJECT_ID env var, else current project.
  * @returns {Promise<string>} The eventId
  */
 async function publishEvent(db, eventType, orgID, data, options = {}) {
@@ -45,7 +50,8 @@ async function publishEvent(db, eventType, orgID, data, options = {}) {
   await db.collection("event_log").doc(event.eventId).set(event);
 
   // 2. Publish to Pub/Sub for async subscriber consumption
-  const pubsub = getPubSubClient();
+  const busProjectId = resolveBusProjectId(options.busProjectId);
+  const pubsub = getPubSubClient(busProjectId);
   const topic = pubsub.topic(TOPIC_NAME);
   const messageBuffer = Buffer.from(JSON.stringify(event));
 
