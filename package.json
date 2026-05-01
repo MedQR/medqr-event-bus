@@ -1,13 +1,14 @@
 {
   "name": "@medqr/event-bus",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "Central event bus for MedQR hospital operating system — schema, publisher, and subscriber utilities",
   "main": "src/index.js",
   "scripts": {
     "test": "echo \"No tests yet\" && exit 0"
   },
   "dependencies": {
-    "@google-cloud/pubsub": "^4.0.0"
+    "@google-cloud/pubsub": "^4.0.0",
+    "google-auth-library": "^9.0.0"
   },
   "peerDependencies": {
     "firebase-admin": ">=11.0.0",
