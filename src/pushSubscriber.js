@@ -37,10 +37,15 @@ async function verifyOidcToken(authHeader, expectedAudience) {
   }
   const token = authHeader.slice(7);
   try {
-    const ticket = await oauthClient.verifyIdToken({
-      idToken: token,
-      audience: expectedAudience,
-    });
+    // Pass audience only if provided. When omitted, the token is
+    // verified for signature + issuer (Google) but the audience
+    // claim isn't checked against anything specific. Cloud
+    // Functions / Cloud Run already gate inbound calls via run.invoker
+    // IAM, so an unknown caller cannot reach us at all - the audience
+    // claim is belt-and-suspenders, not the primary auth.
+    const verifyOpts = { idToken: token };
+    if (expectedAudience) verifyOpts.audience = expectedAudience;
+    const ticket = await oauthClient.verifyIdToken(verifyOpts);
     return { ok: true, payload: ticket.getPayload() };
   } catch (err) {
     return { ok: false, reason: "verify-failed: " + err.message };
@@ -67,15 +72,16 @@ function createPushSubscriber(name, eventTypes, handler, options = {}) {
       return;
     }
 
-    // Verify OIDC token. Audience defaults to the function's own URL
-    // (Pub/Sub signs the token with that as the aud claim when the
-    // push subscription was created with --push-auth-service-account).
-    const expectedAudience =
-      options.expectedAudience ||
-      "https://" + req.hostname + req.originalUrl.split("?")[0];
+    // Verify OIDC token signature + issuer. Audience check only runs
+    // if expectedAudience is explicitly passed via options. We don't
+    // try to auto-derive it from req.hostname because Cloud
+    // Run/Functions sit behind a load balancer where the visible
+    // hostname doesn't match the public URL Pub/Sub signed for.
+    // Inbound caller is gated by run.invoker IAM - the OIDC verify
+    // here is a second layer (signature proves it came from Google).
     const verify = await verifyOidcToken(
         req.headers.authorization,
-        expectedAudience,
+        options.expectedAudience,
     );
     if (!verify.ok) {
       console.warn("[" + name + "] OIDC verify failed:", verify.reason);

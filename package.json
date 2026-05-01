@@ -1,6 +1,6 @@
 {
   "name": "@medqr/event-bus",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "description": "Central event bus for MedQR hospital operating system — schema, publisher, and subscriber utilities",
   "main": "src/index.js",
   "scripts": {
